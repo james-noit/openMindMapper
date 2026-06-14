@@ -148,7 +148,7 @@ const getLevel = (node: MindMapNode, nodesById: Map<string, MindMapNode>): numbe
   return level
 }
 
-const levelColor = (level: number): string => LEVEL_COLORS[level] ?? LEVEL_COLORS[(level % (LEVEL_COLORS.length - 1)) + 1]
+const levelColor = (level: number): string => LEVEL_COLORS[level % LEVEL_COLORS.length]
 
 const isValidDocument = (doc: unknown): doc is MindMapDocument => {
   if (!doc || typeof doc !== 'object') {
