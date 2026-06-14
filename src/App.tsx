@@ -326,7 +326,7 @@ function App() {
   const [nodes, setNodes] = useState<MindMapNode[]>(() => createInitialNodes('en'))
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [nodeModalOpen, setNodeModalOpen] = useState(false)
-  const [aiExpanded, setAiExpanded] = useState(false)
+  const [aiPanelOpen, setAiPanelOpen] = useState(false)
   const [provider, setProvider] = useState<AiProvider>('OpenAI')
   const [apiKey, setApiKey] = useState('')
   const [connectedProvider, setConnectedProvider] = useState<AiProvider | null>(null)
@@ -555,31 +555,137 @@ function App() {
 
   /* ── Renderers ────────────────────────────────────────────────────────── */
 
-  const renderTree = (node: MindMapNode) => {
-    const children = childrenByParent.get(node.id) ?? []
-    const level = getLevel(node, nodesById)
+  const renderHorizontalTree = () => {
+    const nodeCount = nodes.length
+    const adaptiveScale = Math.min(1, Math.sqrt(RADIAL_SCALE_THRESHOLD / Math.max(nodeCount, RADIAL_SCALE_THRESHOLD)))
+    const nodeW = Math.max(60, Math.round(110 * adaptiveScale))
+    const nodeH = Math.max(22, Math.round(34 * adaptiveScale))
+    const xStep = nodeW + Math.max(30, Math.round(60 * adaptiveScale))
+    const ySpacing = nodeH + Math.max(10, Math.round(20 * adaptiveScale))
+    const nodeFontSize = Math.max(8, Math.round(11 * adaptiveScale))
+    const maxLabelChars = Math.max(6, Math.round(RADIAL_MAX_LABEL_LENGTH * adaptiveScale))
+
+    const leafCount = new Map<string, number>()
+    const computeLeafCount = (nodeId: string): number => {
+      const children = childrenByParent.get(nodeId) ?? []
+      if (children.length === 0) {
+        leafCount.set(nodeId, 1)
+        return 1
+      }
+      const total = children.reduce((sum, child) => sum + computeLeafCount(child.id), 0)
+      leafCount.set(nodeId, total)
+      return total
+    }
+    computeLeafCount(ROOT_ID)
+
+    const positions = new Map<string, { x: number; y: number }>()
+    const totalLeaves = leafCount.get(ROOT_ID) ?? 1
+    const totalHeight = totalLeaves * ySpacing
+
+    const assign = (nodeId: string, level: number, yStart: number, yEnd: number) => {
+      positions.set(nodeId, { x: level * xStep, y: (yStart + yEnd) / 2 })
+      const children = childrenByParent.get(nodeId) ?? []
+      if (children.length === 0) return
+      const total = leafCount.get(nodeId) ?? 1
+      let y = yStart
+      for (const child of children) {
+        const childLeaves = leafCount.get(child.id) ?? 1
+        const childH = (childLeaves / total) * (yEnd - yStart)
+        assign(child.id, level + 1, y, y + childH)
+        y += childH
+      }
+    }
+    assign(ROOT_ID, 0, 0, totalHeight)
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    for (const pos of positions.values()) {
+      minX = Math.min(minX, pos.x - nodeW / 2)
+      minY = Math.min(minY, pos.y - nodeH / 2)
+      maxX = Math.max(maxX, pos.x + nodeW / 2)
+      maxY = Math.max(maxY, pos.y + nodeH / 2)
+    }
+    const pad = 20
+    minX -= pad; minY -= pad; maxX += pad; maxY += pad
+
+    const naturalW = maxX - minX
+    const naturalH = maxY - minY
+    const zoomedW = naturalW / zoom
+    const zoomedH = naturalH / zoom
+    const centerX = (minX + maxX) / 2
+    const centerY = (minY + maxY) / 2
 
     return (
-      <li key={node.id}>
-        <button
-          type="button"
-          className="node"
-          style={{ borderColor: levelColor(level) }}
-          aria-pressed={selectedNodeId === node.id}
-          onClick={() => openNodeModal(node.id)}
-        >
-          <span className="node-level" style={{ backgroundColor: levelColor(level) }}>
-            {level}
-          </span>
-          <span>{node.title}</span>
-        </button>
+      <svg
+        className="mindmap-tree-svg"
+        viewBox={`${centerX - zoomedW / 2} ${centerY - zoomedH / 2} ${zoomedW} ${zoomedH}`}
+        role="img"
+        aria-label={t.mapTitle}
+      >
+        {nodes.map((node) => {
+          if (!node.parentId) return null
+          const from = positions.get(node.parentId)
+          const to = positions.get(node.id)
+          if (!from || !to) return null
+          const parentRight = from.x + nodeW / 2
+          const childLeft = to.x - nodeW / 2
+          const midX = (parentRight + childLeft) / 2
+          return (
+            <path
+              key={`edge-${node.id}`}
+              d={`M ${parentRight} ${from.y} C ${midX} ${from.y}, ${midX} ${to.y}, ${childLeft} ${to.y}`}
+              fill="none"
+              stroke="var(--border-color)"
+              strokeWidth={2}
+            />
+          )
+        })}
 
-        {children.length > 0 && (
-          <ul aria-label={`children-of-${node.id}`}>
-            {children.map((child) => renderTree(child))}
-          </ul>
-        )}
-      </li>
+        {nodes.map((node) => {
+          const pos = positions.get(node.id)
+          if (!pos) return null
+          const level = getLevel(node, nodesById)
+          const color = levelColor(level)
+          const isSelected = selectedNodeId === node.id
+          const label = node.title.length > maxLabelChars ? node.title.slice(0, maxLabelChars - 1) + '…' : node.title
+          return (
+            <g
+              key={node.id}
+              onClick={() => openNodeModal(node.id)}
+              style={{ cursor: 'pointer' }}
+              role="button"
+              aria-pressed={isSelected}
+              aria-label={node.title}
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') openNodeModal(node.id)
+              }}
+            >
+              <rect
+                x={pos.x - nodeW / 2}
+                y={pos.y - nodeH / 2}
+                width={nodeW}
+                height={nodeH}
+                rx={nodeH / 2}
+                fill={color}
+                fillOpacity={isSelected ? 1 : 0.82}
+                stroke={isSelected ? 'var(--accent-color)' : color}
+                strokeWidth={isSelected ? 3 : 1}
+              />
+              <text
+                x={pos.x}
+                y={pos.y}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fill="#fff"
+                fontSize={nodeFontSize}
+                style={{ pointerEvents: 'none', userSelect: 'none' }}
+              >
+                {label}
+              </text>
+            </g>
+          )
+        })}
+      </svg>
     )
   }
 
@@ -742,6 +848,83 @@ function App() {
             </select>
           </div>
 
+          {/* AI assistant button */}
+          <div className="ai-wrapper">
+            <button
+              type="button"
+              className="menu-btn"
+              aria-expanded={aiPanelOpen}
+              aria-controls="ai-panel"
+              aria-label={aiPanelOpen ? t.collapseAi : t.expandAi}
+              onClick={() => setAiPanelOpen((o) => !o)}
+            >
+              <AiIcon />
+              <span>{t.aiPanel}</span>
+            </button>
+
+            {aiPanelOpen && (
+              <div id="ai-panel" className="ai-dropdown" role="dialog" aria-label={t.aiPanel}>
+                <label htmlFor="provider-select">{t.provider}</label>
+                <select
+                  id="provider-select"
+                  value={provider}
+                  onChange={(event) => setProvider(event.target.value as AiProvider)}
+                >
+                  <option value="OpenAI">OpenAI</option>
+                  <option value="Anthropic">Anthropic</option>
+                  <option value="Google Gemini">Google Gemini</option>
+                </select>
+
+                <label htmlFor="api-key">{t.apiKey}</label>
+                <input
+                  id="api-key"
+                  type="password"
+                  value={apiKey}
+                  onChange={(event) => setApiKey(event.target.value)}
+                />
+
+                <button type="button" className="connect-btn" onClick={connectProvider}>
+                  <ConnectIcon />
+                  <span>{t.connect}</span>
+                </button>
+                <p className="status-line" aria-live="polite">
+                  {connectedProvider ? (
+                    <span className="status-connected">
+                      ● {t.connected} ({connectedProvider})
+                    </span>
+                  ) : (
+                    <span className="status-disconnected">○ {t.disconnected}</span>
+                  )}
+                </p>
+
+                <form onSubmit={sendAiMessage}>
+                  <label htmlFor="chat-input" className="sr-only">
+                    {t.askAi}
+                  </label>
+                  <textarea
+                    id="chat-input"
+                    value={chatInput}
+                    onChange={(event) => setChatInput(event.target.value)}
+                    placeholder={t.askAi}
+                    rows={3}
+                  />
+                  <button type="submit" className="send-btn">
+                    <SendIcon />
+                    <span>{t.send}</span>
+                  </button>
+                </form>
+
+                <ul className="chat-list" aria-live="polite">
+                  {messages.map((message, index) => (
+                    <li key={`${message.role}-${index}`} className={`chat-msg chat-msg--${message.role}`}>
+                      <strong>{message.role === 'user' ? 'You' : 'AI'}:</strong> {message.content}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+
           {/* Menu button */}
           <div className="menu-wrapper">
             <button
@@ -813,7 +996,7 @@ function App() {
       />
 
       {/* ── Main content ────────────────────────────────────────────────── */}
-      <main className="content-grid">
+      <main className="main-content">
         {/* Mind map */}
         <section className="mindmap-area" aria-label={t.mapTitle}>
           <div className="mindmap-actions">
@@ -841,105 +1024,9 @@ function App() {
             </div>
           </div>
 
-          {viewType === 'tree' && (
-            <div className="mindmap-tree-scroll">
-              <div style={{ transform: `scale(${zoom})`, transformOrigin: 'top left', display: 'inline-block' }}>
-                <ul className="mindmap-tree">{renderTree(nodesById.get(ROOT_ID) ?? nodes[0])}</ul>
-              </div>
-            </div>
-          )}
+          {viewType === 'tree' && renderHorizontalTree()}
           {viewType === 'radial' && renderRadial()}
         </section>
-
-        {/* Side panel */}
-        <aside className="side-panel">
-          <section className="ai-panel" aria-label={t.aiPanel}>
-            <div className="ai-panel-header">
-              <h2>
-                <AiIcon />
-                <span>{t.aiPanel}</span>
-              </h2>
-              <button
-                type="button"
-                className="icon-btn"
-                onClick={() => setAiExpanded((e) => !e)}
-                aria-expanded={aiExpanded}
-                aria-controls="ai-panel-body"
-                aria-label={aiExpanded ? t.collapseAi : t.expandAi}
-              >
-                {aiExpanded ? <ChevronUpIcon /> : <ChevronDownIcon />}
-              </button>
-            </div>
-
-            {aiExpanded && (
-              <div id="ai-panel-body">
-                <label htmlFor="provider-select">{t.provider}</label>
-                <select
-                  id="provider-select"
-                  value={provider}
-                  onChange={(event) => setProvider(event.target.value as AiProvider)}
-                >
-                  <option value="OpenAI">OpenAI</option>
-                  <option value="Anthropic">Anthropic</option>
-                  <option value="Google Gemini">Google Gemini</option>
-                </select>
-
-                <label htmlFor="api-key">{t.apiKey}</label>
-                <input
-                  id="api-key"
-                  type="password"
-                  value={apiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
-                />
-
-                <button type="button" className="connect-btn" onClick={connectProvider}>
-                  <ConnectIcon />
-                  <span>{t.connect}</span>
-                </button>
-                <p className="status-line" aria-live="polite">
-                  {connectedProvider ? (
-                    <span className="status-connected">
-                      ● {t.connected} ({connectedProvider})
-                    </span>
-                  ) : (
-                    <span className="status-disconnected">○ {t.disconnected}</span>
-                  )}
-                </p>
-
-                <form onSubmit={sendAiMessage}>
-                  <label htmlFor="chat-input" className="sr-only">
-                    {t.askAi}
-                  </label>
-                  <textarea
-                    id="chat-input"
-                    value={chatInput}
-                    onChange={(event) => setChatInput(event.target.value)}
-                    placeholder={t.askAi}
-                    rows={3}
-                  />
-                  <button type="submit" className="send-btn">
-                    <SendIcon />
-                    <span>{t.send}</span>
-                  </button>
-                </form>
-
-                <ul className="chat-list" aria-live="polite">
-                  {messages.map((message, index) => (
-                    <li key={`${message.role}-${index}`} className={`chat-msg chat-msg--${message.role}`}>
-                      <strong>{message.role === 'user' ? 'You' : 'AI'}:</strong> {message.content}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </section>
-
-          {!nodeModalOpen && (
-            <p className="click-hint" aria-live="polite">
-              {t.clickNodeHint}
-            </p>
-          )}
-        </aside>
       </main>
 
       {/* ── Node edit modal ──────────────────────────────────────────────── */}

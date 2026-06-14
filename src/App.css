@@ -112,7 +112,8 @@
 
 /* ── Dropdown menu ────────────────────────────────────────────────────────── */
 
-.menu-wrapper {
+.menu-wrapper,
+.ai-wrapper {
   position: relative;
 }
 
@@ -130,6 +131,24 @@
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
+}
+
+.ai-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  width: 340px;
+  max-height: 80vh;
+  overflow-y: auto;
+  background: var(--surface-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  z-index: 200;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .menu-group {
@@ -175,22 +194,27 @@
   margin: 0.35rem 0;
 }
 
-/* ── Content grid ─────────────────────────────────────────────────────────── */
+/* ── Content area ─────────────────────────────────────────────────────────── */
 
-.content-grid {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 1rem;
-  padding: 1rem;
+.main-content {
+  padding: 0.75rem;
+  height: calc(100vh - 3.5rem);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ── Mind map area ────────────────────────────────────────────────────────── */
 
 .mindmap-area {
+  flex: 1;
+  min-height: 0;
   background: var(--surface-bg);
   border: 1px solid var(--border-color);
   border-radius: 0.75rem;
   padding: 1rem;
+  display: flex;
+  flex-direction: column;
 }
 
 .mindmap-actions {
@@ -271,16 +295,20 @@
   box-shadow: 0 0 0 3px var(--focus-color);
 }
 
-/* Radial SVG view */
-.mindmap-radial {
+/* Tree SVG view */
+.mindmap-tree-svg {
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  min-height: 420px;
   display: block;
 }
 
-/* Tree zoom wrapper */
-.mindmap-tree-scroll {
-  overflow: auto;
+/* Radial SVG view */
+.mindmap-radial {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: block;
 }
 
 /* Zoom controls */
@@ -301,102 +329,6 @@
   user-select: none;
 }
 
-/* ── Side panel ───────────────────────────────────────────────────────────── */
-
-.side-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.click-hint {
-  font-size: 0.85rem;
-  color: var(--text-color);
-  opacity: 0.6;
-  margin: 0;
-  padding: 0.75rem 1rem;
-  background: var(--surface-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 0.75rem;
-  text-align: center;
-}
-
-/* AI panel */
-.ai-panel {
-  background: var(--surface-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 0.75rem;
-  padding: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.ai-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.ai-panel-header h2 {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-#ai-panel-body {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding-top: 0.25rem;
-}
-
-.status-line {
-  margin: 0;
-  font-size: 0.85rem;
-}
-
-.status-connected {
-  color: #4caf50;
-}
-
-.status-disconnected {
-  opacity: 0.6;
-}
-
-.connect-btn,
-.send-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  width: 100%;
-  justify-content: center;
-}
-
-.chat-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  max-height: 12rem;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.chat-msg {
-  font-size: 0.875rem;
-  padding: 0.35rem 0.5rem;
-  border-radius: 0.4rem;
-  background: var(--button-bg);
-}
-
-.chat-msg--assistant {
-  background: color-mix(in srgb, var(--accent-color) 15%, var(--surface-bg));
-}
 
 /* ── Modal ────────────────────────────────────────────────────────────────── */
 
@@ -532,12 +464,6 @@ textarea:focus-visible {
 }
 
 /* ── Responsive ───────────────────────────────────────────────────────────── */
-
-@media (max-width: 960px) {
-  .content-grid {
-    grid-template-columns: 1fr;
-  }
-}
 
 @media (max-width: 600px) {
   .view-btn span {
