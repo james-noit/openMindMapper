@@ -140,6 +140,7 @@ const RADIAL_RADIUS_STEP = 160
 const RADIAL_VIEW_PADDING = 70
 const RADIAL_POSITION_PRECISION = 10
 const RADIAL_MAX_LABEL_LENGTH = 14
+const RADIAL_SCALE_THRESHOLD = 8
 
 const TEXT = {
   en: {
@@ -584,13 +585,13 @@ function App() {
 
   const renderRadial = () => {
     const nodeCount = nodes.length
-    const adaptiveScale = Math.min(1, Math.sqrt(8 / Math.max(nodeCount, 8)))
+    const adaptiveScale = Math.min(1, Math.sqrt(RADIAL_SCALE_THRESHOLD / Math.max(nodeCount, RADIAL_SCALE_THRESHOLD)))
     const adaptRadiusStep = Math.max(70, Math.round(RADIAL_RADIUS_STEP * adaptiveScale))
     const ellipseRx = Math.max(26, Math.round(54 * adaptiveScale))
     const ellipseRy = Math.max(11, Math.round(22 * adaptiveScale))
     const nodeFontSize = Math.max(8, Math.round(11 * adaptiveScale))
     const nodePadding = Math.max(40, Math.round(RADIAL_VIEW_PADDING * adaptiveScale))
-    const maxLabelChars = Math.max(8, RADIAL_MAX_LABEL_LENGTH)
+    const maxLabelChars = Math.max(6, Math.round(RADIAL_MAX_LABEL_LENGTH * adaptiveScale))
 
     const positions = computeRadialLayout(adaptRadiusStep)
 
