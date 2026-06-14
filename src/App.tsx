@@ -605,7 +605,10 @@ function App() {
       maxY = Math.max(maxY, pos.y + nodeH / 2)
     }
     const pad = 20
-    minX -= pad; minY -= pad; maxX += pad; maxY += pad
+    minX -= pad
+    minY -= pad
+    maxX += pad
+    maxY += pad
 
     const naturalW = maxX - minX
     const naturalH = maxY - minY
@@ -863,7 +866,7 @@ function App() {
             </button>
 
             {aiPanelOpen && (
-              <div id="ai-panel" className="ai-dropdown" role="dialog" aria-label={t.aiPanel}>
+              <div id="ai-panel" className="ai-dropdown" aria-label={t.aiPanel}>
                 <label htmlFor="provider-select">{t.provider}</label>
                 <select
                   id="provider-select"
