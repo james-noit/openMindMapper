@@ -1,0 +1,25 @@
+:root {
+  --page-bg: #f5f7fb;
+  --surface-bg: #ffffff;
+  --input-bg: #ffffff;
+  --text-color: #17212f;
+  --border-color: #c6d0dd;
+  --button-bg: #f0f4fa;
+  --focus-color: #20549366;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, sans-serif;
+  line-height: 1.4;
+}
+
+:root[data-theme='dark'] {
+  --page-bg: #0f1625;
+  --surface-bg: #161f33;
+  --input-bg: #111827;
+  --text-color: #f3f5f8;
+  --border-color: #3d4c67;
+  --button-bg: #26334c;
+  --focus-color: #7fb3ff66;
+}
+
+body {
+  margin: 0;
+}
