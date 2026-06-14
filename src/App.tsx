@@ -85,6 +85,16 @@ const ChevronUpIcon = () => (
     <path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6 1.41 1.41z" />
   </svg>
 )
+const ZoomInIcon = () => (
+  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zm2.5-4h-2v2H9v-2H7V9h2V7h1v2h2v1z" />
+  </svg>
+)
+const ZoomOutIcon = () => (
+  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zM7 9h5v1H7z" />
+  </svg>
+)
 const GlobeIcon = () => (
   <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" />
@@ -130,7 +140,6 @@ const RADIAL_RADIUS_STEP = 160
 const RADIAL_VIEW_PADDING = 70
 const RADIAL_POSITION_PRECISION = 10
 const RADIAL_MAX_LABEL_LENGTH = 14
-const RADIAL_TRUNCATE_AT = 13
 
 const TEXT = {
   en: {
@@ -323,6 +332,8 @@ function App() {
   const [chatInput, setChatInput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
 
+  const [zoom, setZoom] = useState(1.0)
+
   const importInputRef = useRef<HTMLInputElement>(null)
 
   const t = TEXT[language]
@@ -497,9 +508,12 @@ function App() {
     setNodeModalOpen(true)
   }
 
+  const zoomIn = () => setZoom((z) => Math.min(4, parseFloat((z + 0.25).toFixed(2))))
+  const zoomOut = () => setZoom((z) => Math.max(0.25, parseFloat((z - 0.25).toFixed(2))))
+
   /* ── Radial layout ────────────────────────────────────────────────────── */
 
-  const computeRadialLayout = (): Map<string, { x: number; y: number }> => {
+  const computeRadialLayout = (radiusStep: number): Map<string, { x: number; y: number }> => {
     const positions = new Map<string, { x: number; y: number }>()
     const subtreeSize = new Map<string, number>()
 
@@ -514,7 +528,7 @@ function App() {
 
     const assign = (nodeId: string, startAngle: number, endAngle: number, level: number) => {
       const midAngle = (startAngle + endAngle) / 2
-      const radius = level * RADIAL_RADIUS_STEP
+      const radius = level * radiusStep
       positions.set(nodeId, {
         x: Math.round(radius * Math.cos(midAngle) * RADIAL_POSITION_PRECISION) / RADIAL_POSITION_PRECISION,
         y: Math.round(radius * Math.sin(midAngle) * RADIAL_POSITION_PRECISION) / RADIAL_POSITION_PRECISION,
@@ -569,7 +583,16 @@ function App() {
   }
 
   const renderRadial = () => {
-    const positions = computeRadialLayout()
+    const nodeCount = nodes.length
+    const adaptiveScale = Math.min(1, Math.sqrt(8 / Math.max(nodeCount, 8)))
+    const adaptRadiusStep = Math.max(70, Math.round(RADIAL_RADIUS_STEP * adaptiveScale))
+    const ellipseRx = Math.max(26, Math.round(54 * adaptiveScale))
+    const ellipseRy = Math.max(11, Math.round(22 * adaptiveScale))
+    const nodeFontSize = Math.max(8, Math.round(11 * adaptiveScale))
+    const nodePadding = Math.max(40, Math.round(RADIAL_VIEW_PADDING * adaptiveScale))
+    const maxLabelChars = Math.max(8, RADIAL_MAX_LABEL_LENGTH)
+
+    const positions = computeRadialLayout(adaptRadiusStep)
 
     let minX = 0
     let minY = 0
@@ -577,19 +600,23 @@ function App() {
     let maxY = 0
 
     for (const pos of positions.values()) {
-      minX = Math.min(minX, pos.x - RADIAL_VIEW_PADDING)
-      minY = Math.min(minY, pos.y - RADIAL_VIEW_PADDING)
-      maxX = Math.max(maxX, pos.x + RADIAL_VIEW_PADDING)
-      maxY = Math.max(maxY, pos.y + RADIAL_VIEW_PADDING)
+      minX = Math.min(minX, pos.x - ellipseRx - nodePadding)
+      minY = Math.min(minY, pos.y - ellipseRy - nodePadding)
+      maxX = Math.max(maxX, pos.x + ellipseRx + nodePadding)
+      maxY = Math.max(maxY, pos.y + ellipseRy + nodePadding)
     }
 
-    const vbW = maxX - minX
-    const vbH = maxY - minY
+    const naturalVbW = maxX - minX
+    const naturalVbH = maxY - minY
+    const zoomedVbW = naturalVbW / zoom
+    const zoomedVbH = naturalVbH / zoom
+    const centerX = (minX + maxX) / 2
+    const centerY = (minY + maxY) / 2
 
     return (
       <svg
         className="mindmap-radial"
-        viewBox={`${minX} ${minY} ${vbW} ${vbH}`}
+        viewBox={`${centerX - zoomedVbW / 2} ${centerY - zoomedVbH / 2} ${zoomedVbW} ${zoomedVbH}`}
         role="img"
         aria-label={t.mapTitle}
       >
@@ -619,7 +646,7 @@ function App() {
           const level = getLevel(node, nodesById)
           const color = levelColor(level)
           const isSelected = selectedNodeId === node.id
-          const label = node.title.length > RADIAL_MAX_LABEL_LENGTH ? node.title.slice(0, RADIAL_TRUNCATE_AT) + '…' : node.title
+          const label = node.title.length > maxLabelChars ? node.title.slice(0, maxLabelChars - 1) + '…' : node.title
 
           return (
             <g
@@ -637,8 +664,8 @@ function App() {
               <ellipse
                 cx={pos.x}
                 cy={pos.y}
-                rx={54}
-                ry={22}
+                rx={ellipseRx}
+                ry={ellipseRy}
                 fill={color}
                 fillOpacity={isSelected ? 1 : 0.82}
                 stroke={isSelected ? 'var(--accent-color)' : color}
@@ -650,7 +677,7 @@ function App() {
                 textAnchor="middle"
                 dominantBaseline="central"
                 fill="#fff"
-                fontSize="11"
+                fontSize={nodeFontSize}
                 style={{ pointerEvents: 'none', userSelect: 'none' }}
               >
                 {label}
@@ -715,65 +742,66 @@ function App() {
           </div>
 
           {/* Menu button */}
-          <button
-            type="button"
-            className="menu-btn"
-            aria-expanded={menuOpen}
-            aria-controls="collapsible-menu"
-            onClick={() => setMenuOpen((open) => !open)}
-          >
-            <MenuIcon />
-            <span>{t.menu}</span>
-          </button>
-        </div>
-      </header>
-
-      {/* ── Dropdown menu ───────────────────────────────────────────────── */}
-      {menuOpen && (
-        <nav id="collapsible-menu" className="dropdown-menu" aria-label={t.menu}>
-          <div className="menu-group">
+          <div className="menu-wrapper">
             <button
               type="button"
-              className="menu-item submenu-trigger"
-              aria-expanded={fileMenuOpen}
-              onClick={() => setFileMenuOpen((open) => !open)}
+              className="menu-btn"
+              aria-expanded={menuOpen}
+              aria-controls="collapsible-menu"
+              onClick={() => setMenuOpen((open) => !open)}
             >
-              <FileIcon />
-              <span>{t.file}</span>
-              {fileMenuOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
+              <MenuIcon />
+              <span>{t.menu}</span>
             </button>
 
-            {fileMenuOpen && (
-              <div className="submenu">
-                <button
-                  type="button"
-                  className="menu-item"
-                  onClick={() => importInputRef.current?.click()}
-                >
-                  <ImportIcon />
-                  <span>{t.import}</span>
+            {menuOpen && (
+              <nav id="collapsible-menu" className="dropdown-menu" aria-label={t.menu}>
+                <div className="menu-group">
+                  <button
+                    type="button"
+                    className="menu-item submenu-trigger"
+                    aria-expanded={fileMenuOpen}
+                    onClick={() => setFileMenuOpen((open) => !open)}
+                  >
+                    <FileIcon />
+                    <span>{t.file}</span>
+                    {fileMenuOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
+                  </button>
+
+                  {fileMenuOpen && (
+                    <div className="submenu">
+                      <button
+                        type="button"
+                        className="menu-item"
+                        onClick={() => importInputRef.current?.click()}
+                      >
+                        <ImportIcon />
+                        <span>{t.import}</span>
+                      </button>
+                      <button type="button" className="menu-item" onClick={exportMap}>
+                        <ExportIcon />
+                        <span>{t.export}</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="menu-divider" role="separator" />
+
+                <button type="button" className="menu-item" onClick={resetMap}>
+                  <ResetIcon />
+                  <span>{t.reset}</span>
                 </button>
-                <button type="button" className="menu-item" onClick={exportMap}>
-                  <ExportIcon />
-                  <span>{t.export}</span>
+
+                <button type="button" className="menu-item" onClick={toggleTheme}>
+                  {theme === 'light' ? <MoonIcon /> : <SunIcon />}
+                  <span>{t.theme}</span>
                 </button>
-              </div>
+              </nav>
             )}
           </div>
-
-          <div className="menu-divider" role="separator" />
-
-          <button type="button" className="menu-item" onClick={resetMap}>
-            <ResetIcon />
-            <span>{t.reset}</span>
-          </button>
-
-          <button type="button" className="menu-item" onClick={toggleTheme}>
-            {theme === 'light' ? <MoonIcon /> : <SunIcon />}
-            <span>{t.theme}</span>
-          </button>
-        </nav>
-      )}
+        </div>
+      </header>
 
       <input
         ref={importInputRef}
@@ -801,10 +829,23 @@ function App() {
               <DeleteIcon />
               <span>{t.removeNode}</span>
             </button>
+            <div className="zoom-controls" role="group" aria-label="Zoom">
+              <button type="button" onClick={zoomOut} disabled={zoom <= 0.25} aria-label="Zoom out">
+                <ZoomOutIcon />
+              </button>
+              <span className="zoom-level">{Math.round(zoom * 100)}%</span>
+              <button type="button" onClick={zoomIn} disabled={zoom >= 4} aria-label="Zoom in">
+                <ZoomInIcon />
+              </button>
+            </div>
           </div>
 
           {viewType === 'tree' && (
-            <ul className="mindmap-tree">{renderTree(nodesById.get(ROOT_ID) ?? nodes[0])}</ul>
+            <div className="mindmap-tree-scroll">
+              <div style={{ transform: `scale(${zoom})`, transformOrigin: 'top left', display: 'inline-block' }}>
+                <ul className="mindmap-tree">{renderTree(nodesById.get(ROOT_ID) ?? nodes[0])}</ul>
+              </div>
+            </div>
           )}
           {viewType === 'radial' && renderRadial()}
         </section>

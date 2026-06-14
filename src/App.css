@@ -95,6 +95,7 @@
 .lang-wrapper select {
   border: none;
   background: transparent;
+  color: var(--text-color);
   padding: 0.4rem 0;
   width: auto;
   font-size: 0.85rem;
@@ -111,10 +112,14 @@
 
 /* ── Dropdown menu ────────────────────────────────────────────────────────── */
 
+.menu-wrapper {
+  position: relative;
+}
+
 .dropdown-menu {
   position: absolute;
-  top: 100%;
-  right: 1rem;
+  top: calc(100% + 4px);
+  right: 0;
   min-width: 220px;
   background: var(--surface-bg);
   border: 1px solid var(--border-color);
@@ -271,6 +276,29 @@
   width: 100%;
   min-height: 420px;
   display: block;
+}
+
+/* Tree zoom wrapper */
+.mindmap-tree-scroll {
+  overflow: auto;
+}
+
+/* Zoom controls */
+.zoom-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  padding: 0 0.15rem;
+  background: var(--button-bg);
+}
+
+.zoom-level {
+  font-size: 0.8rem;
+  min-width: 2.8rem;
+  text-align: center;
+  user-select: none;
 }
 
 /* ── Side panel ───────────────────────────────────────────────────────────── */
