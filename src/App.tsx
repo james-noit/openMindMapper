@@ -222,6 +222,7 @@ const TEXT = {
     endpointRequired: 'Endpoint URL is required for Custom / Local.',
     endpointInvalid: 'Please enter a valid URL.',
     endpointUrlCustom: 'Endpoint URL',
+    modelNameCustom: 'Model name (optional)',
     stopAi: 'Stop',
     applyToMap: 'Add to map',
     suggestionsLabel: 'node suggestions',
@@ -273,6 +274,7 @@ const TEXT = {
     endpointRequired: 'La URL del endpoint es requerida para Custom / Local.',
     endpointInvalid: 'Ingresa una URL válida.',
     endpointUrlCustom: 'URL del endpoint',
+    modelNameCustom: 'Nombre del modelo (opcional)',
     stopAi: 'Detener',
     applyToMap: 'Agregar al mapa',
     suggestionsLabel: 'sugerencias de nodos',
@@ -629,6 +631,7 @@ function App() {
   const [provider, setProvider] = useState<AiProvider>('OpenAI')
   const [apiKey, setApiKey] = useState('')
   const [customEndpoint, setCustomEndpoint] = useState('')
+  const [customModel, setCustomModel] = useState('')
   const [connectedProvider, setConnectedProvider] = useState<AiProvider | null>(null)
   const [chatInput, setChatInput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -929,7 +932,7 @@ ${mapLines}`
           break
         }
         case 'Custom': {
-          for await (const chunk of streamOpenAICompatible(customEndpoint.trim(), apiKey, '', sysPrompt, historyWithUser, controller.signal)) {
+          for await (const chunk of streamOpenAICompatible(customEndpoint.trim(), apiKey, customModel.trim(), sysPrompt, historyWithUser, controller.signal)) {
             onChunk(chunk)
           }
           break
@@ -1409,10 +1412,21 @@ ${mapLines}`
                     <input
                       id="endpoint-url"
                       type="url"
-                      placeholder="http://localhost:11434/v1/chat/completions"
+                      placeholder="http://localhost:1234/v1/chat/completions"
                       value={customEndpoint}
                       onChange={(event) => {
                         setCustomEndpoint(event.target.value)
+                        setConnectedProvider(null)
+                      }}
+                    />
+                    <label htmlFor="model-name">{t.modelNameCustom}</label>
+                    <input
+                      id="model-name"
+                      type="text"
+                      placeholder="gemma-3-27b-it"
+                      value={customModel}
+                      onChange={(event) => {
+                        setCustomModel(event.target.value)
                         setConnectedProvider(null)
                       }}
                     />
