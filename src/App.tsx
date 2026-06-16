@@ -105,12 +105,22 @@ const ConnectIcon = () => (
     <path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z" />
   </svg>
 )
+const SaveIcon = () => (
+  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z" />
+  </svg>
+)
+const WarningIcon = () => (
+  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z" />
+  </svg>
+)
 
 /* ─── Types ───────────────────────────────────────────────────────────────── */
 
 type Language = 'en' | 'es'
 type Theme = 'light' | 'dark'
-type AiProvider = 'OpenAI' | 'Anthropic' | 'Google Gemini'
+type AiProvider = 'OpenAI' | 'Anthropic' | 'Google Gemini' | 'Mistral' | 'Cohere' | 'Custom'
 type ViewType = 'tree' | 'radial'
 
 type MindMapNode = {
@@ -144,7 +154,7 @@ const RADIAL_SCALE_THRESHOLD = 8
 
 const TEXT = {
   en: {
-    appTitle: 'OpenMindMapper',
+    appTitle: 'OpenMindMapper v1.2',
     menu: 'Menu',
     file: 'File',
     import: 'Import .openmindmapper',
@@ -160,6 +170,7 @@ const TEXT = {
     collapseAi: 'Collapse AI assistant',
     provider: 'Provider',
     apiKey: 'API key',
+    endpointUrl: 'Endpoint URL (optional)',
     connect: 'Connect',
     connected: 'Connected',
     disconnected: 'Disconnected',
@@ -171,15 +182,20 @@ const TEXT = {
     nodeTitle: 'Node title',
     nodeDescription: 'Node description',
     nodeEdit: 'Edit node',
+    newNodeTitle: 'New node',
+    save: 'Save',
+    cancel: 'Cancel',
     close: 'Close',
-    clickNodeHint: 'Click a node to edit it.',
+    clickNodeHint: 'Click a node to select it.',
     centralTitle: 'Central Idea',
     childTitle: 'New node',
     invalidFile: 'Invalid .openmindmapper file.',
     connectRequired: 'Connect a provider before sending AI messages.',
+    confirmDelete: 'Delete node with subnodes?',
+    confirmDeleteBody: 'This node has child nodes. All subnodes will also be deleted.',
   },
   es: {
-    appTitle: 'OpenMindMapper',
+    appTitle: 'OpenMindMapper v1.2',
     menu: 'Menú',
     file: 'Archivo',
     import: 'Importar .openmindmapper',
@@ -195,6 +211,7 @@ const TEXT = {
     collapseAi: 'Contraer asistente IA',
     provider: 'Proveedor',
     apiKey: 'Clave API',
+    endpointUrl: 'URL del endpoint (opcional)',
     connect: 'Conectar',
     connected: 'Conectado',
     disconnected: 'Desconectado',
@@ -206,12 +223,17 @@ const TEXT = {
     nodeTitle: 'Título del nodo',
     nodeDescription: 'Descripción del nodo',
     nodeEdit: 'Editar nodo',
+    newNodeTitle: 'Nuevo nodo',
+    save: 'Guardar',
+    cancel: 'Cancelar',
     close: 'Cerrar',
-    clickNodeHint: 'Haz clic en un nodo para editarlo.',
+    clickNodeHint: 'Haz clic en un nodo para seleccionarlo.',
     centralTitle: 'Idea Central',
     childTitle: 'Nuevo nodo',
     invalidFile: 'Archivo .openmindmapper inválido.',
     connectRequired: 'Conecta un proveedor antes de enviar mensajes a la IA.',
+    confirmDelete: '¿Eliminar nodo con subnodos?',
+    confirmDeleteBody: 'Este nodo tiene subnodos. Todos los subnodos también serán eliminados.',
   },
 } as const
 
@@ -329,11 +351,19 @@ function App() {
   const [aiPanelOpen, setAiPanelOpen] = useState(false)
   const [provider, setProvider] = useState<AiProvider>('OpenAI')
   const [apiKey, setApiKey] = useState('')
+  const [customEndpoint, setCustomEndpoint] = useState('')
   const [connectedProvider, setConnectedProvider] = useState<AiProvider | null>(null)
   const [chatInput, setChatInput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
 
   const [zoom, setZoom] = useState(1.0)
+
+  const [pendingNewNode, setPendingNewNode] = useState<{
+    parentId: string
+    title: string
+    description: string
+  } | null>(null)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
 
   const importInputRef = useRef<HTMLInputElement>(null)
 
@@ -394,19 +424,45 @@ function App() {
       return
     }
 
+    setPendingNewNode({ parentId: selectedNodeId, title: t.childTitle, description: '' })
+  }
+
+  const confirmAddNode = () => {
+    if (!pendingNewNode) {
+      return
+    }
+
     const newNode: MindMapNode = {
       id: crypto.randomUUID(),
-      parentId: selectedNodeId,
-      title: t.childTitle,
-      description: '',
+      parentId: pendingNewNode.parentId,
+      title: pendingNewNode.title,
+      description: pendingNewNode.description,
     }
 
     setNodes((currentNodes) => [...currentNodes, newNode])
     setSelectedNodeId(newNode.id)
-    setNodeModalOpen(true)
+    setPendingNewNode(null)
   }
 
-  const deleteSelectedNode = () => {
+  const cancelAddNode = () => {
+    setPendingNewNode(null)
+  }
+
+  const requestDeleteNode = () => {
+    if (!selectedNode || selectedNode.id === ROOT_ID) {
+      return
+    }
+
+    const children = childrenByParent.get(selectedNode.id) ?? []
+
+    if (children.length > 0) {
+      setDeleteConfirmOpen(true)
+    } else {
+      confirmDeleteNode()
+    }
+  }
+
+  const confirmDeleteNode = () => {
     if (!selectedNode || selectedNode.id === ROOT_ID) {
       return
     }
@@ -415,12 +471,15 @@ function App() {
     setNodes((currentNodes) => currentNodes.filter((node) => !toDelete.has(node.id)))
     setSelectedNodeId(selectedNode.parentId)
     setNodeModalOpen(false)
+    setDeleteConfirmOpen(false)
   }
 
   const resetMap = () => {
     setNodes(createInitialNodes(language))
     setSelectedNodeId(null)
     setNodeModalOpen(false)
+    setPendingNewNode(null)
+    setDeleteConfirmOpen(false)
     setMessages([])
     setChatInput('')
     setMenuOpen(false)
@@ -460,6 +519,8 @@ function App() {
       setNodes(parsed.nodes)
       setSelectedNodeId(null)
       setNodeModalOpen(false)
+      setPendingNewNode(null)
+      setDeleteConfirmOpen(false)
       setMessages([])
       setMenuOpen(false)
       setFileMenuOpen(false)
@@ -471,7 +532,10 @@ function App() {
   }
 
   const connectProvider = () => {
-    if (apiKey.trim().length > 0) {
+    const hasApiKey = apiKey.trim().length > 0
+    const hasEndpoint = customEndpoint.trim().length > 0
+
+    if (provider === 'Custom' ? hasEndpoint : hasApiKey) {
       setConnectedProvider(provider)
     }
   }
@@ -653,14 +717,14 @@ function App() {
           return (
             <g
               key={node.id}
-              onClick={() => openNodeModal(node.id)}
+              onClick={() => setSelectedNodeId(node.id)}
               style={{ cursor: 'pointer' }}
               role="button"
               aria-pressed={isSelected}
               aria-label={node.title}
               tabIndex={0}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') openNodeModal(node.id)
+                if (e.key === 'Enter' || e.key === ' ') setSelectedNodeId(node.id)
               }}
             >
               <rect
@@ -685,6 +749,23 @@ function App() {
               >
                 {label}
               </text>
+              {isSelected && (
+                <g
+                  onClick={(e) => { e.stopPropagation(); openNodeModal(node.id) }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); openNodeModal(node.id) }
+                  }}
+                  style={{ cursor: 'pointer' }}
+                  role="button"
+                  aria-label={t.nodeEdit}
+                  tabIndex={0}
+                >
+                  <circle cx={pos.x + nodeW / 2 + 14} cy={pos.y} r={10} fill="var(--accent-color)" />
+                  <svg x={pos.x + nodeW / 2 + 7} y={pos.y - 7} width={14} height={14} viewBox="0 0 24 24">
+                    <path fill="white" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
+                  </svg>
+                </g>
+              )}
             </g>
           )
         })}
@@ -761,14 +842,14 @@ function App() {
           return (
             <g
               key={node.id}
-              onClick={() => openNodeModal(node.id)}
+              onClick={() => setSelectedNodeId(node.id)}
               style={{ cursor: 'pointer' }}
               role="button"
               aria-pressed={isSelected}
               aria-label={node.title}
               tabIndex={0}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') openNodeModal(node.id)
+                if (e.key === 'Enter' || e.key === ' ') setSelectedNodeId(node.id)
               }}
             >
               <ellipse
@@ -792,6 +873,23 @@ function App() {
               >
                 {label}
               </text>
+              {isSelected && (
+                <g
+                  onClick={(e) => { e.stopPropagation(); openNodeModal(node.id) }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); openNodeModal(node.id) }
+                  }}
+                  style={{ cursor: 'pointer' }}
+                  role="button"
+                  aria-label={t.nodeEdit}
+                  tabIndex={0}
+                >
+                  <circle cx={pos.x + ellipseRx + 14} cy={pos.y} r={10} fill="var(--accent-color)" />
+                  <svg x={pos.x + ellipseRx + 7} y={pos.y - 7} width={14} height={14} viewBox="0 0 24 24">
+                    <path fill="white" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
+                  </svg>
+                </g>
+              )}
             </g>
           )
         })}
@@ -876,6 +974,9 @@ function App() {
                   <option value="OpenAI">OpenAI</option>
                   <option value="Anthropic">Anthropic</option>
                   <option value="Google Gemini">Google Gemini</option>
+                  <option value="Mistral">Mistral</option>
+                  <option value="Cohere">Cohere</option>
+                  <option value="Custom">Custom / Local</option>
                 </select>
 
                 <label htmlFor="api-key">{t.apiKey}</label>
@@ -884,6 +985,15 @@ function App() {
                   type="password"
                   value={apiKey}
                   onChange={(event) => setApiKey(event.target.value)}
+                />
+
+                <label htmlFor="endpoint-url">{t.endpointUrl}</label>
+                <input
+                  id="endpoint-url"
+                  type="url"
+                  placeholder="https://api.example.com/v1"
+                  value={customEndpoint}
+                  onChange={(event) => setCustomEndpoint(event.target.value)}
                 />
 
                 <button type="button" className="connect-btn" onClick={connectProvider}>
@@ -1010,7 +1120,7 @@ function App() {
             </button>
             <button
               type="button"
-              onClick={deleteSelectedNode}
+              onClick={requestDeleteNode}
               disabled={!selectedNode || selectedNode.id === ROOT_ID}
             >
               <DeleteIcon />
@@ -1029,6 +1139,14 @@ function App() {
 
           {viewType === 'tree' && renderHorizontalTree()}
           {viewType === 'radial' && renderRadial()}
+
+          {/* ── Description popover ─────────────────────────────────────── */}
+          {selectedNode && selectedNode.description && (
+            <div className="node-popover" role="status" aria-live="polite">
+              <strong className="node-popover-title">{selectedNode.title}</strong>
+              <p>{selectedNode.description}</p>
+            </div>
+          )}
         </section>
       </main>
 
@@ -1083,7 +1201,7 @@ function App() {
             <div className="modal-footer">
               <button
                 type="button"
-                onClick={deleteSelectedNode}
+                onClick={requestDeleteNode}
                 disabled={selectedNode.id === ROOT_ID}
                 className="danger-btn"
               >
@@ -1093,6 +1211,114 @@ function App() {
               <button type="button" onClick={() => setNodeModalOpen(false)}>
                 <CloseIcon />
                 <span>{t.close}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── New node creation modal ──────────────────────────────────────── */}
+      {pendingNewNode && (
+        <div
+          className="modal-overlay"
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) cancelAddNode()
+          }}
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="new-node-modal-title"
+          >
+            <div className="modal-header">
+              <h2 id="new-node-modal-title">{t.newNodeTitle}</h2>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={cancelAddNode}
+                aria-label={t.close}
+              >
+                <CloseIcon />
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <label htmlFor="new-node-title">{t.nodeTitle}</label>
+              <input
+                id="new-node-title"
+                type="text"
+                value={pendingNewNode.title}
+                onChange={(e) => setPendingNewNode({ ...pendingNewNode, title: e.target.value })}
+                autoFocus
+              />
+
+              <label htmlFor="new-node-description">{t.nodeDescription}</label>
+              <textarea
+                id="new-node-description"
+                value={pendingNewNode.description}
+                onChange={(e) => setPendingNewNode({ ...pendingNewNode, description: e.target.value })}
+                rows={4}
+              />
+            </div>
+
+            <div className="modal-footer">
+              <button type="button" onClick={cancelAddNode}>
+                <CloseIcon />
+                <span>{t.cancel}</span>
+              </button>
+              <button type="button" className="primary-btn" onClick={confirmAddNode}>
+                <SaveIcon />
+                <span>{t.save}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete confirmation modal ────────────────────────────────────── */}
+      {deleteConfirmOpen && selectedNode && (
+        <div
+          className="modal-overlay"
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setDeleteConfirmOpen(false)
+          }}
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-delete-title"
+          >
+            <div className="modal-header">
+              <h2 id="confirm-delete-title">
+                <WarningIcon />
+                {t.confirmDelete}
+              </h2>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => setDeleteConfirmOpen(false)}
+                aria-label={t.close}
+              >
+                <CloseIcon />
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <p>{t.confirmDeleteBody}</p>
+            </div>
+
+            <div className="modal-footer">
+              <button type="button" onClick={() => setDeleteConfirmOpen(false)}>
+                <CloseIcon />
+                <span>{t.cancel}</span>
+              </button>
+              <button type="button" className="danger-btn" onClick={confirmDeleteNode}>
+                <DeleteIcon />
+                <span>{t.removeNode}</span>
               </button>
             </div>
           </div>
