@@ -137,6 +137,8 @@
   gap: 0.15rem;
 }
 
+/* ── AI dropdown ──────────────────────────────────────────────────────────── */
+
 .ai-dropdown {
   position: absolute;
   top: calc(100% + 4px);
@@ -153,6 +155,175 @@
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+/* ── AI connect + status ──────────────────────────────────────────────────── */
+
+.connect-btn {
+  font-size: 0.88rem;
+}
+
+.connect-btn.connected {
+  background: color-mix(in srgb, #4caf50 12%, transparent);
+  border-color: #4caf50;
+  color: #4caf50;
+}
+
+.connection-error {
+  color: #ef5350;
+  font-size: 0.82rem;
+  margin: 0;
+}
+
+.status-line {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.status-connected {
+  color: #4caf50;
+  font-weight: 600;
+}
+
+.status-disconnected {
+  opacity: 0.55;
+}
+
+/* ── Chat form ────────────────────────────────────────────────────────────── */
+
+.chat-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.chat-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ── Chat list ────────────────────────────────────────────────────────────── */
+
+.chat-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.chat-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.5rem;
+  font-size: 0.87rem;
+  line-height: 1.5;
+}
+
+.chat-msg--user {
+  background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+  align-self: flex-end;
+  max-width: 92%;
+}
+
+.chat-msg--assistant {
+  background: var(--button-bg);
+  max-width: 100%;
+}
+
+.chat-msg-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.chat-msg-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── Streaming / typing animations ───────────────────────────────────────── */
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 0.75s linear infinite;
+  display: inline-block;
+  transform-origin: center;
+}
+
+@keyframes cursorBlink {
+  50% { opacity: 0; }
+}
+
+.cursor-blink {
+  animation: cursorBlink 0.9s step-end infinite;
+  color: var(--accent-color);
+}
+
+.typing-dots span {
+  animation: typingDot 1.4s infinite both;
+}
+
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typingDot {
+  0%, 80%, 100% { opacity: 0; }
+  40% { opacity: 1; }
+}
+
+/* ── Stop button ──────────────────────────────────────────────────────────── */
+
+.stop-btn {
+  background: rgba(239, 83, 80, 0.1);
+  border-color: #ef5350;
+  color: #ef5350;
+  font-size: 0.85rem;
+}
+
+.stop-btn:not(:disabled):hover {
+  background: rgba(239, 83, 80, 0.2);
+}
+
+/* ── Node suggestions bar ─────────────────────────────────────────────────── */
+
+.suggestions-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: color-mix(in srgb, var(--accent-color) 8%, var(--surface-bg));
+  border: 1px solid var(--accent-color);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  flex-wrap: wrap;
+}
+
+.suggestions-count {
+  font-size: 0.82rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.apply-btn {
+  font-size: 0.82rem;
+  padding: 0.3rem 0.6rem;
+  white-space: nowrap;
+}
+
+/* ── Mobile backdrop ─────────────────────────────────────────────────────── */
+
+.ai-backdrop {
+  display: none;
 }
 
 .menu-group {
@@ -516,9 +687,31 @@ textarea:focus-visible {
     font-size: 0.9rem;
   }
 
+  /* AI panel becomes a bottom sheet on mobile */
+  .ai-wrapper {
+    position: static;
+  }
+
+  .ai-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 199;
+  }
+
   .ai-dropdown {
-    width: min(340px, calc(100% + 0.6rem));
-    right: -0.3rem;
+    position: fixed;
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-height: 75dvh;
+    border-radius: 1rem 1rem 0 0;
+    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.35);
+    z-index: 200;
+    padding: 0.85rem 1rem 1.5rem;
   }
 
   .dropdown-menu {

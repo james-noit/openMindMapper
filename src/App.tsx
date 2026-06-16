@@ -115,6 +115,22 @@ const WarningIcon = () => (
     <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z" />
   </svg>
 )
+const StopIcon = () => (
+  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M6 6h12v12H6z" />
+  </svg>
+)
+const CheckIcon = () => (
+  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+  </svg>
+)
+const LoadingIcon = () => (
+  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="spin">
+    <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+    <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
+  </svg>
+)
 
 /* ─── Types ───────────────────────────────────────────────────────────────── */
 
@@ -151,6 +167,13 @@ const RADIAL_VIEW_PADDING = 70
 const RADIAL_POSITION_PRECISION = 10
 const RADIAL_MAX_LABEL_LENGTH = 14
 const RADIAL_SCALE_THRESHOLD = 8
+const MAX_NODE_TITLE_LENGTH = 80
+/** Milliseconds between each node appearing when applying AI suggestions */
+const NODE_ANIMATION_DELAY_MS = 200
+/** Regex matching Markdown bullet points with optional bold markers */
+const BULLET_POINT_PATTERN = /^(\s*)[-*]\s+\*{0,2}([^*\n]+?)\*{0,2}\s*$/
+/** Milliseconds for the connect button animation before marking connected */
+const CONNECTION_ANIMATION_DURATION_MS = 700
 
 const TEXT = {
   en: {
@@ -193,6 +216,16 @@ const TEXT = {
     connectRequired: 'Connect a provider before sending AI messages.',
     confirmDelete: 'Delete node with subnodes?',
     confirmDeleteBody: 'This node has child nodes. All subnodes will also be deleted.',
+    connecting: 'Connecting…',
+    connectionFailed: 'Connection failed',
+    apiKeyRequired: 'API key is required.',
+    endpointRequired: 'Endpoint URL is required for Custom / Local.',
+    endpointInvalid: 'Please enter a valid URL.',
+    endpointUrlCustom: 'Endpoint URL',
+    stopAi: 'Stop',
+    applyToMap: 'Add to map',
+    suggestionsLabel: 'node suggestions',
+    aiThinking: 'Thinking…',
   },
   es: {
     appTitle: 'OpenMindMapper v1.2',
@@ -234,6 +267,16 @@ const TEXT = {
     connectRequired: 'Conecta un proveedor antes de enviar mensajes a la IA.',
     confirmDelete: '¿Eliminar nodo con subnodos?',
     confirmDeleteBody: 'Este nodo tiene subnodos. Todos los subnodos también serán eliminados.',
+    connecting: 'Conectando…',
+    connectionFailed: 'Error de conexión',
+    apiKeyRequired: 'La clave API es requerida.',
+    endpointRequired: 'La URL del endpoint es requerida para Custom / Local.',
+    endpointInvalid: 'Ingresa una URL válida.',
+    endpointUrlCustom: 'URL del endpoint',
+    stopAi: 'Detener',
+    applyToMap: 'Agregar al mapa',
+    suggestionsLabel: 'sugerencias de nodos',
+    aiThinking: 'Pensando…',
   },
 } as const
 
@@ -337,6 +380,240 @@ const isValidDocument = (doc: unknown): doc is MindMapDocument => {
   })
 }
 
+/* ─── AI provider configs ─────────────────────────────────────────────────── */
+
+const PROVIDER_DEFAULT_ENDPOINTS: Partial<Record<AiProvider, string>> = {
+  OpenAI: 'https://api.openai.com/v1/chat/completions',
+  Mistral: 'https://api.mistral.ai/v1/chat/completions',
+  Anthropic: 'https://api.anthropic.com/v1/messages',
+  Cohere: 'https://api.cohere.com/v2/chat',
+}
+
+const PROVIDER_DEFAULT_MODELS: Record<AiProvider, string> = {
+  OpenAI: 'gpt-4o-mini',
+  Anthropic: 'claude-3-haiku-20240307',
+  'Google Gemini': 'gemini-1.5-flash',
+  Mistral: 'mistral-small-latest',
+  Cohere: 'command-r',
+  Custom: '',
+}
+
+/* ─── Streaming helpers ───────────────────────────────────────────────────── */
+
+async function* streamOpenAICompatible(
+  url: string,
+  apiKey: string,
+  model: string,
+  systemPrompt: string,
+  messages: ChatMessage[],
+  signal: AbortSignal,
+): AsyncGenerator<string, void, undefined> {
+  const requestMessages = [
+    { role: 'system', content: systemPrompt },
+    ...messages.map((m) => ({ role: m.role, content: m.content })),
+  ]
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(apiKey ? { Authorization: 'Bearer ' + apiKey } : {}),
+    },
+    body: JSON.stringify({ model, stream: true, max_tokens: 2048, messages: requestMessages }),
+    signal,
+  })
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`
+    try {
+      const d = (await res.json()) as { error?: { message?: string } }
+      if (d.error?.message) detail = d.error.message
+    } catch { /* ignore */ }
+    throw new Error(detail)
+  }
+  const reader = res.body!.getReader()
+  const dec = new TextDecoder()
+  let buf = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += dec.decode(value, { stream: true })
+    const lines = buf.split('\n')
+    buf = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      const payload = line.slice(6).trim()
+      if (payload === '[DONE]') return
+      try {
+        const parsed = JSON.parse(payload) as { choices?: Array<{ delta?: { content?: string } }> }
+        const text = parsed.choices?.[0]?.delta?.content
+        if (text) yield text
+      } catch { /* ignore */ }
+    }
+  }
+}
+
+async function* streamAnthropic(
+  apiKey: string,
+  systemPrompt: string,
+  messages: ChatMessage[],
+  signal: AbortSignal,
+): AsyncGenerator<string, void, undefined> {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: PROVIDER_DEFAULT_MODELS['Anthropic'],
+      max_tokens: 2048,
+      stream: true,
+      system: systemPrompt,
+      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    }),
+    signal,
+  })
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`
+    try {
+      const d = (await res.json()) as { error?: { message?: string } }
+      if (d.error?.message) detail = d.error.message
+    } catch { /* ignore */ }
+    throw new Error(detail)
+  }
+  const reader = res.body!.getReader()
+  const dec = new TextDecoder()
+  let buf = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += dec.decode(value, { stream: true })
+    const lines = buf.split('\n')
+    buf = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      try {
+        const parsed = JSON.parse(line.slice(6).trim()) as {
+          type?: string
+          delta?: { type?: string; text?: string }
+        }
+        if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
+          const text = parsed.delta.text
+          if (text) yield text
+        }
+      } catch { /* ignore */ }
+    }
+  }
+}
+
+async function* streamGemini(
+  apiKey: string,
+  systemPrompt: string,
+  messages: ChatMessage[],
+  signal: AbortSignal,
+): AsyncGenerator<string, void, undefined> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${PROVIDER_DEFAULT_MODELS['Google Gemini']}:streamGenerateContent?key=${apiKey}&alt=sse`
+  const contents = messages.map((m) => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }],
+  }))
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: systemPrompt }] },
+      contents,
+      generationConfig: { maxOutputTokens: 2048 },
+    }),
+    signal,
+  })
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`
+    try {
+      const d = (await res.json()) as { error?: { message?: string } }
+      if (d.error?.message) detail = d.error.message
+    } catch { /* ignore */ }
+    throw new Error(detail)
+  }
+  const reader = res.body!.getReader()
+  const dec = new TextDecoder()
+  let buf = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += dec.decode(value, { stream: true })
+    const lines = buf.split('\n')
+    buf = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      try {
+        const parsed = JSON.parse(line.slice(6).trim()) as {
+          candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+        }
+        const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text
+        if (text) yield text
+      } catch { /* ignore */ }
+    }
+  }
+}
+
+async function* streamCohere(
+  apiKey: string,
+  systemPrompt: string,
+  messages: ChatMessage[],
+  signal: AbortSignal,
+): AsyncGenerator<string, void, undefined> {
+  const res = await fetch('https://api.cohere.com/v2/chat', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer ' + apiKey,
+    },
+    body: JSON.stringify({
+      model: PROVIDER_DEFAULT_MODELS['Cohere'],
+      stream: true,
+      preamble: systemPrompt,
+      messages: messages.map((m) => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content,
+      })),
+    }),
+    signal,
+  })
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`
+    try {
+      const d = (await res.json()) as { message?: string }
+      if (d.message) detail = d.message
+    } catch { /* ignore */ }
+    throw new Error(detail)
+  }
+  const reader = res.body!.getReader()
+  const dec = new TextDecoder()
+  let buf = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += dec.decode(value, { stream: true })
+    const lines = buf.split('\n')
+    buf = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.trim()) continue
+      try {
+        const parsed = JSON.parse(line) as {
+          type?: string
+          delta?: { message?: { content?: { text?: string } } }
+        }
+        if (parsed.type === 'content-delta') {
+          const text = parsed.delta?.message?.content?.text
+          if (text) yield text
+        }
+      } catch { /* ignore */ }
+    }
+  }
+}
+
 /* ─── App ─────────────────────────────────────────────────────────────────── */
 
 function App() {
@@ -355,6 +632,12 @@ function App() {
   const [connectedProvider, setConnectedProvider] = useState<AiProvider | null>(null)
   const [chatInput, setChatInput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [isConnecting, setIsConnecting] = useState(false)
+  const [connectionError, setConnectionError] = useState('')
+  const [isAiTyping, setIsAiTyping] = useState(false)
+  const [streamingContent, setStreamingContent] = useState('')
+  const [pendingNodeSuggestions, setPendingNodeSuggestions] = useState<MindMapNode[] | null>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   const [zoom, setZoom] = useState(1.0)
 
@@ -532,40 +815,162 @@ function App() {
   }
 
   const connectProvider = () => {
-    const hasApiKey = apiKey.trim().length > 0
-    const hasEndpoint = customEndpoint.trim().length > 0
+    setConnectionError('')
 
-    if (provider === 'Custom' ? hasEndpoint : hasApiKey) {
-      setConnectedProvider(provider)
+    if (provider === 'Custom') {
+      const trimmed = customEndpoint.trim()
+      if (!trimmed) {
+        setConnectionError(t.endpointRequired)
+        return
+      }
+      try { new URL(trimmed) } catch {
+        setConnectionError(t.endpointInvalid)
+        return
+      }
+    } else if (!apiKey.trim()) {
+      setConnectionError(t.apiKeyRequired)
+      return
     }
+
+    setIsConnecting(true)
+    setTimeout(() => {
+      setConnectedProvider(provider)
+      setIsConnecting(false)
+    }, CONNECTION_ANIMATION_DURATION_MS)
   }
 
-  const sendAiMessage = (event: FormEvent<HTMLFormElement>) => {
+  const buildSystemPrompt = () => {
+    const mapLines = nodes
+      .map((n) => '  '.repeat(getLevel(n, nodesById)) + '- ' + n.title + (n.description ? ': ' + n.description : ''))
+      .join('\n')
+    return `You are an AI assistant for OpenMindMapper, a mind-mapping web app. Help the user brainstorm, organize, and expand their mind map. When suggesting new nodes or a map structure, present them as a hierarchical bullet list using "- " and 2-space indentation per level so they can be applied directly to the map. Ask clarifying questions when the user's request is ambiguous. Be creative, thorough, and concise.
+
+Current mind map:
+${mapLines}`
+  }
+
+  const parseNodeSuggestions = (text: string, anchorParentId: string): MindMapNode[] => {
+    const lines = text.split('\n')
+    const result: MindMapNode[] = []
+    const stack: Array<{ id: string; indent: number }> = [{ id: anchorParentId, indent: -1 }]
+
+    for (const line of lines) {
+      const match = line.match(BULLET_POINT_PATTERN)
+      if (!match) continue
+      const indent = match[1].length
+      const title = match[2].replace(/`/g, '').trim().slice(0, MAX_NODE_TITLE_LENGTH)
+      if (!title) continue
+      while (stack.length > 1 && stack[stack.length - 1].indent >= indent) stack.pop()
+      const newNode: MindMapNode = {
+        id: crypto.randomUUID(),
+        parentId: stack[stack.length - 1].id,
+        title,
+        description: '',
+      }
+      result.push(newNode)
+      stack.push({ id: newNode.id, indent })
+    }
+
+    return result
+  }
+
+  const applyNodeSuggestions = () => {
+    if (!pendingNodeSuggestions) return
+    pendingNodeSuggestions.forEach((node, i) => {
+      setTimeout(() => {
+        setNodes((prev) => [...prev, node])
+      }, i * NODE_ANIMATION_DELAY_MS)
+    })
+    const lastNode = pendingNodeSuggestions[pendingNodeSuggestions.length - 1]
+    if (lastNode) {
+      setTimeout(() => setSelectedNodeId(lastNode.id), pendingNodeSuggestions.length * NODE_ANIMATION_DELAY_MS)
+    }
+    setPendingNodeSuggestions(null)
+  }
+
+  const sendAiMessage = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-
     const trimmedMessage = chatInput.trim()
+    if (!trimmedMessage || !connectedProvider || isAiTyping) return
 
-    if (!trimmedMessage) {
-      return
-    }
-
-    if (!connectedProvider) {
-      window.alert(t.connectRequired)
-      return
-    }
-
-    const focusTitle = selectedNode?.title ?? TEXT[language].centralTitle
-    const response =
-      language === 'es'
-        ? `[${connectedProvider}] Sugiero crear 2-3 subnodos para "${focusTitle}" y priorizar riesgos, objetivos y acciones.`
-        : `[${connectedProvider}] I suggest adding 2-3 child nodes for "${focusTitle}" focused on risks, goals, and actions.`
-
-    setMessages((currentMessages) => [
-      ...currentMessages,
-      { role: 'user', content: trimmedMessage },
-      { role: 'assistant', content: response },
-    ])
+    const userMsg: ChatMessage = { role: 'user', content: trimmedMessage }
+    const historyWithUser = [...messages, userMsg]
+    setMessages(historyWithUser)
     setChatInput('')
+    setIsAiTyping(true)
+    setStreamingContent('')
+    setPendingNodeSuggestions(null)
+
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+    let fullText = ''
+
+    const onChunk = (chunk: string) => {
+      fullText += chunk
+      setStreamingContent(fullText)
+    }
+
+    try {
+      const sysPrompt = buildSystemPrompt()
+
+      switch (connectedProvider) {
+        case 'OpenAI': {
+          const url = customEndpoint.trim() || PROVIDER_DEFAULT_ENDPOINTS['OpenAI']!
+          for await (const chunk of streamOpenAICompatible(url, apiKey, PROVIDER_DEFAULT_MODELS['OpenAI'], sysPrompt, historyWithUser, controller.signal)) {
+            onChunk(chunk)
+          }
+          break
+        }
+        case 'Mistral': {
+          const url = PROVIDER_DEFAULT_ENDPOINTS['Mistral']!
+          for await (const chunk of streamOpenAICompatible(url, apiKey, PROVIDER_DEFAULT_MODELS['Mistral'], sysPrompt, historyWithUser, controller.signal)) {
+            onChunk(chunk)
+          }
+          break
+        }
+        case 'Custom': {
+          for await (const chunk of streamOpenAICompatible(customEndpoint.trim(), apiKey, '', sysPrompt, historyWithUser, controller.signal)) {
+            onChunk(chunk)
+          }
+          break
+        }
+        case 'Anthropic': {
+          for await (const chunk of streamAnthropic(apiKey, sysPrompt, historyWithUser, controller.signal)) {
+            onChunk(chunk)
+          }
+          break
+        }
+        case 'Google Gemini': {
+          for await (const chunk of streamGemini(apiKey, sysPrompt, historyWithUser, controller.signal)) {
+            onChunk(chunk)
+          }
+          break
+        }
+        case 'Cohere': {
+          for await (const chunk of streamCohere(apiKey, sysPrompt, historyWithUser, controller.signal)) {
+            onChunk(chunk)
+          }
+          break
+        }
+      }
+
+      if (fullText) {
+        setMessages((prev) => [...prev, { role: 'assistant', content: fullText }])
+        const suggestions = parseNodeSuggestions(fullText, selectedNodeId ?? ROOT_ID)
+        if (suggestions.length >= 2) setPendingNodeSuggestions(suggestions)
+      }
+    } catch (err) {
+      if ((err as Error)?.name !== 'AbortError') {
+        const msg = (err as Error)?.message ?? 'Unknown error'
+        setMessages((prev) => [...prev, { role: 'assistant', content: '⚠️ ' + msg }])
+      } else if (fullText) {
+        setMessages((prev) => [...prev, { role: 'assistant', content: fullText }])
+      }
+    } finally {
+      setIsAiTyping(false)
+      setStreamingContent('')
+      abortControllerRef.current = null
+    }
   }
 
   const openNodeModal = (nodeId: string) => {
@@ -969,7 +1374,11 @@ function App() {
                 <select
                   id="provider-select"
                   value={provider}
-                  onChange={(event) => setProvider(event.target.value as AiProvider)}
+                  onChange={(event) => {
+                    setProvider(event.target.value as AiProvider)
+                    setConnectedProvider(null)
+                    setConnectionError('')
+                  }}
                 >
                   <option value="OpenAI">OpenAI</option>
                   <option value="Anthropic">Anthropic</option>
@@ -979,61 +1388,123 @@ function App() {
                   <option value="Custom">Custom / Local</option>
                 </select>
 
-                <label htmlFor="api-key">{t.apiKey}</label>
-                <input
-                  id="api-key"
-                  type="password"
-                  value={apiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
-                />
+                {provider !== 'Custom' && (
+                  <>
+                    <label htmlFor="api-key">{t.apiKey}</label>
+                    <input
+                      id="api-key"
+                      type="password"
+                      value={apiKey}
+                      onChange={(event) => {
+                        setApiKey(event.target.value)
+                        setConnectedProvider(null)
+                      }}
+                    />
+                  </>
+                )}
 
-                <label htmlFor="endpoint-url">{t.endpointUrl}</label>
-                <input
-                  id="endpoint-url"
-                  type="url"
-                  placeholder="https://api.example.com/v1"
-                  value={customEndpoint}
-                  onChange={(event) => setCustomEndpoint(event.target.value)}
-                />
+                {provider === 'Custom' && (
+                  <>
+                    <label htmlFor="endpoint-url">{t.endpointUrlCustom}</label>
+                    <input
+                      id="endpoint-url"
+                      type="url"
+                      placeholder="http://localhost:11434/v1/chat/completions"
+                      value={customEndpoint}
+                      onChange={(event) => {
+                        setCustomEndpoint(event.target.value)
+                        setConnectedProvider(null)
+                      }}
+                    />
+                  </>
+                )}
 
-                <button type="button" className="connect-btn" onClick={connectProvider}>
-                  <ConnectIcon />
-                  <span>{t.connect}</span>
+                {connectionError && (
+                  <p className="connection-error" role="alert">{connectionError}</p>
+                )}
+
+                <button
+                  type="button"
+                  className={`connect-btn${connectedProvider === provider ? ' connected' : ''}`}
+                  onClick={connectProvider}
+                  disabled={isConnecting}
+                >
+                  {isConnecting ? <LoadingIcon /> : connectedProvider === provider ? <CheckIcon /> : <ConnectIcon />}
+                  <span>{isConnecting ? t.connecting : connectedProvider === provider ? t.connected : t.connect}</span>
                 </button>
+
                 <p className="status-line" aria-live="polite">
                   {connectedProvider ? (
-                    <span className="status-connected">
-                      ● {t.connected} ({connectedProvider})
-                    </span>
+                    <span className="status-connected">✓ {t.connected}: {connectedProvider}</span>
                   ) : (
                     <span className="status-disconnected">○ {t.disconnected}</span>
                   )}
                 </p>
 
-                <form onSubmit={sendAiMessage}>
-                  <label htmlFor="chat-input" className="sr-only">
-                    {t.askAi}
-                  </label>
+                <form className="chat-form" onSubmit={sendAiMessage}>
+                  <label htmlFor="chat-input" className="sr-only">{t.askAi}</label>
                   <textarea
                     id="chat-input"
                     value={chatInput}
                     onChange={(event) => setChatInput(event.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        e.currentTarget.form?.requestSubmit()
+                      }
+                    }}
                     placeholder={t.askAi}
-                    rows={3}
+                    rows={2}
+                    disabled={!connectedProvider || isAiTyping}
                   />
-                  <button type="submit" className="send-btn">
-                    <SendIcon />
-                    <span>{t.send}</span>
-                  </button>
+                  <div className="chat-actions">
+                    {isAiTyping ? (
+                      <button
+                        type="button"
+                        className="stop-btn"
+                        onClick={() => abortControllerRef.current?.abort()}
+                      >
+                        <StopIcon />
+                        <span>{t.stopAi}</span>
+                      </button>
+                    ) : (
+                      <button type="submit" className="send-btn primary-btn" disabled={!connectedProvider || !chatInput.trim()}>
+                        <SendIcon />
+                        <span>{t.send}</span>
+                      </button>
+                    )}
+                  </div>
                 </form>
 
                 <ul className="chat-list" aria-live="polite">
                   {messages.map((message, index) => (
                     <li key={`${message.role}-${index}`} className={`chat-msg chat-msg--${message.role}`}>
-                      <strong>{message.role === 'user' ? 'You' : 'AI'}:</strong> {message.content}
+                      <span className="chat-msg-label">{message.role === 'user' ? 'You' : 'AI'}</span>
+                      <span className="chat-msg-content">{message.content}</span>
                     </li>
                   ))}
+                  {isAiTyping && (
+                    <li className="chat-msg chat-msg--assistant chat-msg--streaming">
+                      <span className="chat-msg-label">AI</span>
+                      <span className="chat-msg-content">
+                        {streamingContent || <span className="typing-dots"><span>.</span><span>.</span><span>.</span></span>}
+                        {streamingContent && <span className="cursor-blink"> ▋</span>}
+                      </span>
+                    </li>
+                  )}
                 </ul>
+
+                {pendingNodeSuggestions && pendingNodeSuggestions.length >= 2 && (
+                  <div className="suggestions-bar">
+                    <span className="suggestions-count">{pendingNodeSuggestions.length} {t.suggestionsLabel}</span>
+                    <button type="button" className="primary-btn apply-btn" onClick={applyNodeSuggestions}>
+                      {t.applyToMap}
+                    </button>
+                    <button type="button" className="icon-btn" onClick={() => setPendingNodeSuggestions(null)} aria-label={t.close}>
+                      <CloseIcon />
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1323,6 +1794,15 @@ function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Mobile backdrop for AI panel ──────────────────────────────────── */}
+      {aiPanelOpen && (
+        <div
+          className="ai-backdrop"
+          onClick={() => setAiPanelOpen(false)}
+          aria-hidden="true"
+        />
       )}
     </div>
   )
